@@ -1,0 +1,117 @@
+2018-11-06
+	升级dswork-sso.jar，修改api表单参数从get方式改为post方式，用于处理account等为多字节文本等情况
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+如果又想用统一认证平台，又不想搞这么多集成，又想取到登录用户的，还可以使用更简单直接的办法
+使sso和你的项目部署在同一个域名下
+项目本身不需要集成sso的jar包，但需要使用其跳转规则（登录后跳转回原项目）
+原项目直接通过cookie信息进行用户名的信息获取
+方式如下：
+取出以下两个cookie的key对应的value
+String ticket = cookie.get("DS_SSO_TICKET");
+String code = cookie.get("DS_SSO_CODE");
+String msg = dswork.core.util.EncryptUtil.decodeDes(code, ticket);
+其中msg的信息即为#号分隔的账号和姓名信息，account#name
+
+
+下面的配置中的信息说明
+sso:8888 需要修改成实际对应的sso-server应用的浏览器端访问的发布地址：如192.168.1.1:8888
+127.0.0.1:8888 需要修改成实际对应的sso-server应用的服务器端访问的发布地址：如172.16.1.1:8888
+
+
+一、加入dswork.sso.jar文件（需要【一】的支持，需要slf4j-api的支持，需要gson2.3.1支持）
+	<context-param>
+		<param-name>dsworkSSOConfiguration</param-name>
+		<param-value>/config/sso.properties</param-value>
+	</context-param>
+	参数说明：
+		ssoURL      #需要sso的应用支持，调用api的访问地址的配置信息。使用服务器端访问的ip
+		ssoName     #系统别名，在平台中添加的系统别名
+		ssoPassword #系统访问密码，在平台中添加的系统访问密码
+		webURL      #单点登录项目根地址
+		ignoreURL   #逗号隔开不需要权限过滤的页面
+		sameDomain  #接入应用是和sso在同一域名时，设置为true，实现免跳转登录，不在同一域名时可不设置
+		systemURL   #系统主页面，当系统没登录时，登录后回来的页面，如果想重定向回来时直接回到访问页面则访问地址需要带上&ssoroot=false，这样将会回到原访问页面，一般适用于portal集成类的
+
+	配置文件配置说明（如果在Filter中配置了ssoURL的init-param参数，则不会使用配置文件）
+	配置文件路径使用context-param参数配置，参数名为：dsworkSSOConfiguration，值为配置文件路径
+		sso.ssoURL=http://127.0.0.1:8888/sso/api
+		sso.ssoName=sso-client
+		sso.ssoPassword=1
+		sso.webURL=http://sso-server/sso
+		sso.ignoreURL=/menu.jsp,/m.jsp
+		sso.sameDomain=true
+		sso.systemURL=
+		
+	如果不使用配置文件，则需要在Filter中配置以下变量信息
+		<init-param><param-name>ssoURL</param-name>     <param-value>http://127.0.0.1:8888/sso/api</param-value></init-param>
+		<init-param><param-name>ssoName</param-name>    <param-value>sso-client</param-value></init-param>
+		<init-param><param-name>ssoPassword</param-name><param-value>1</param-value></init-param>
+		<init-param><param-name>webURL</param-name>     <param-value>https://sso-server/sso</param-value></init-param>
+		<init-param><param-name>ignoreURL</param-name>  <param-value>/menu.jsp,/m.jsp</param-value></init-param>
+		<init-param><param-name>sameDomain</param-name> <param-value>false</param-value></init-param>
+		<init-param><param-name>systemURL</param-name> <param-value>http://127.0.0.1/sso-client</param-value></init-param>
+		
+	需要在web.xml中增加以下配置，并且需要sso的应用支持，ssoURL为服务器端访问的ip，webURL为浏览器端访问的ip
+	通过dswork.sso.WebFilter调用getLoginURL和getLogoutURL将取到带着?service=的URL，如：“http://sso-server:8888/sso/login?service=”
+		<filter>
+			<filter-name>websso</filter-name>
+			<filter-class>dswork.sso.WebFilter</filter-class>
+		</filter>
+		<filter-mapping><filter-name>websso</filter-name><url-pattern>/manage/*</url-pattern></filter-mapping>
+
+	如果web容器支持servlet3.0以上，并开启metadata-complete="false"的情况 下，不需要配置以下信息
+		<servlet>
+			<servlet-name>websso_logout</servlet-name>
+			<servlet-class>dswork.sso.WebLogoutServlet</servlet-class>
+			<load-on-startup>1</load-on-startup>
+		</servlet>
+		<servlet-mapping><servlet-name>websso_logout</servlet-name><url-pattern>/logout</url-pattern></servlet-mapping>
+
+二、加入dswork.sso.authfilter.jar文件（需要【一】的支持，适用于在统一认证平台上，配置是以URI地址作为资源管理的，可用uri作为权限拦截的系统）
+		refreshTime #系统的全部权限缓存更新间隔，单位毫秒
+		forbiddenPage #无权访问时跳转的地址
+		ignorePage #逗号隔开不需要权限过滤的页面
+		fixSuffix #逗号隔开需要进行权限过滤的后缀，不配置则默认全部
+		checkParam #是否开启参数进行权限配置，false则不过滤参数
+	需要在web.xml中增加以下配置，其中/p/*为需要处理权限验证的地址
+		<filter>
+			<filter-name>DsworkCasAuthFilter</filter-name>
+			<filter-class>dswork.sso.AuthFilter</filter-class>
+			<init-param>
+				<param-name>refreshTime</param-name>
+				<param-value>3600000</param-value>
+			</init-param>
+			<init-param>
+				<param-name>forbiddenPage</param-name>
+				<param-value>/casNoAccess.jsp</param-value>
+			</init-param>
+			<init-param>
+				<param-name>ignorePage</param-name>
+				<param-value>/menu.jsp,/m.jsp,/index.jsp,/manage/login.htm</param-value>
+			</init-param>
+			<init-param>
+				<param-name>fixSuffix</param-name>
+				<param-value>jsp,htm</param-value>
+			</init-param>
+			<init-param>
+				<param-name>checkParam</param-name>
+				<param-value>false</param-value>
+			</init-param>
+		</filter>
+		<filter-mapping>
+			<filter-name>DsworkCasAuthFilter</filter-name>
+			<url-pattern>/p/*</url-pattern>
+		</filter-mapping>
